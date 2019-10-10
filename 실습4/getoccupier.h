@@ -1,0 +1,1 @@
+char* getoccupier(int roomno);
