@@ -5,6 +5,29 @@
 
 #define BUF_SIZE    512
 
+// copy file which is represented in file descriptor
+int copyfile2(int fd_src, int fd_tar);
+
+// copy file which is represented in character string
+int copyfile(const char * src, const char * tar);
+
+int main(int argc, char * argv[]) {
+
+    if (argc != 3) {
+        printf("program usage : copyfile filename1 filename2\n");
+        return -1;
+    }
+
+    if (copyfile(argv[1], argv[2]) == 0) {
+        printf("success!\n");
+    }
+    else {
+        printf("fail!\n");
+    }
+
+    return 0;
+}
+
 int copyfile2(int fd_src, int fd_tar) {
     
     char buffer[BUF_SIZE];
@@ -13,15 +36,16 @@ int copyfile2(int fd_src, int fd_tar) {
     while( (read_cnt = read(fd_src, buffer, BUF_SIZE)) > 0) {
         
         write_cnt = write(fd_tar, buffer, read_cnt);
-        if (write_cnt < read_cnt) {
-            printf("error in writing %d\n", fd_tar);
+        
+	if (write_cnt < read_cnt) {
+	    printf("error in writing %d\n", fd_tar);
             close(fd_src);
             close(fd_tar);
             return -3;
         }
     }
 
-    if(read_cnt == -4) {
+    if(read_cnt < 0) {
         printf("error in reading %d\n", fd_src);
         close(fd_src);
         close(fd_tar);
@@ -41,7 +65,7 @@ int copyfile(const char * src, const char * tar) {
     char buffer[BUF_SIZE];
     ssize_t read_cnt = 0, write_cnt = 0;
 
-    if( (fd_src = open(src, O_RDONLY, 0644)) == -1) {
+    if( (fd_src = open(src, O_RDONLY)) == -1) {
         printf("error in opening %s\n", src);
         return -1;
     }
@@ -55,7 +79,8 @@ int copyfile(const char * src, const char * tar) {
     while( (read_cnt = read(fd_src, buffer, BUF_SIZE)) > 0) {
         
         write_cnt = write(fd_tar, buffer, read_cnt);
-        if (write_cnt < read_cnt) {
+        
+	if (write_cnt < read_cnt) {
             printf("error in writing %s\n", tar);
             close(fd_src);
             close(fd_tar);
@@ -63,7 +88,7 @@ int copyfile(const char * src, const char * tar) {
         }
     }
 
-    if(read_cnt == -4) {
+    if(read_cnt < 0) {
         printf("error in reading %s\n", src);
         close(fd_src);
         close(fd_tar);
@@ -76,19 +101,3 @@ int copyfile(const char * src, const char * tar) {
     return 0;
 }
 
-int main(int argc, char * argv[]) {
-
-    if (argc != 3) {
-        printf("program usage : copyfile \"filename1\" \"filename2\"\n");
-        return -1;
-    }
-
-    if (copyfile(argv[1], argv[2]) == 0) {
-        printf("success!\n");
-    }
-    else {
-        printf("fail!\n");
-    }
-
-    return 0;
-}
