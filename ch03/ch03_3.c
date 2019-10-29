@@ -29,7 +29,7 @@ void octls(int mode, char * convted_mode)
 
 int main()
 {
-    char * mode0 = "rwxr-wr-w";
+    char * mode0 = "rwxr-xr-x";
     char mode[10] = {'\0',};
     printf("rwxr-xr-x mode's octal number is %o\n", lsoct(mode0));
     octls(0777, mode);

@@ -68,58 +68,67 @@ void symbol_mode(int argc, char** argv, int index)
 {
     int i, j;
     struct stat statbuf;
-    int user[3] = {0,};
-    int mode[4] = {0, };
-    int len = strlen(argv[1]);
+    int user[3] = {0,};     // user(u), group(g), other(o) 기호가 포함되어 있는지 체크하기 위한 배열
+    int mode[4] = {0, };    // u, g, o 에 대해서 read(r), write(w), execute(x), setuid(s) 설정이 되었는지 체크하기 위한 배열
+    int len = strlen(argv[index]);
     char operator = 0;
+    char* filename = argv[argc -1];
     mode_t chgperm = 0;
 
-    if(stat(argv[2], &statbuf) == -1) {
-        fprintf(stderr, "couldn't stat %s\n", argv[2]);
+    if(stat(filename, &statbuf) == -1) {
+        fprintf(stderr, "couldn't stat %s\n", filename);
         exit(3);
     }
 
+    // u+w와 같이 하나의 타겟에 설정하는 경우도 있고
+    // ug+w 와 같이 여러 타겟에 설정하는 경우도 있기 때문에
+    // 이 명령이 어떤 타겟들에 영향을 주는것인지 체크한다.
     for (i = 0; i < len; i++) {
-        if (argv[1][i] == 'u') {
+        if (argv[index][i] == 'u') {
             user[0] = 1;
         }
-        else if (argv[1][i] == 'g') {
+        else if (argv[index][i] == 'g') {
             user[1] = 1;
         }
-        else if (argv[1][i] == 'o')  {
+        else if (argv[index][i] == 'o')  {
             user[2] = 1;
         }
-        else if (argv[1][i] == 'a') {
+        else if (argv[index][i] == 'a') {
             user[0] = user[1] = user[2] = 1;
         }
         else 
             break;
     }
 
-    if (argv[1][i] != '+' && argv[1][i] != '-' && argv[1][i] != '=') {
-        fprintf(stderr, "invalid chmod operand\n");
+    // 특정 허가 모드를 추가하는지, 제거하는지, 특정 허가모드로 설정하는지 체크한다.
+    if (argv[index][i] != '+' && argv[index][i] != '-' && argv[index][i] != '=') {
+        fprintf(stderr, "invalid mychmod operand\n");
         exit(1);
     }
-    operator = argv[1][i];
+    operator = argv[index][i];
     i++;
 
+    // u+rwx 와 같이 여러 허가를 동시에 설정할 수 있기 때문에
+    // 이러한 허가를 한번에 처리하기 위해서 루프를 돌며 mode 배열에 체크해둔다.
     for ( ; i < len; i++) {
-        if (argv[1][i] == 'r') {
+        if (argv[index][i] == 'r') {
             mode[0] = 1;
         }
-        else if (argv[1][i] == 'w') {
+        else if (argv[index][i] == 'w') {
             mode[1] = 1;
         }
-        else if (argv[1][i] == 'x') {
+        else if (argv[index][i] == 'x') {
             mode[2] = 1;
         }
-        else if (argv[1][i] == 's') {
+        else if (argv[index][i] == 's') {
             mode[3] = 1;
+        }
+        else { // argv[index][i] == ','
         }
     }
 
-    for (i = 0; i <  3; i++) {
-        for (j = 0; j < 4; j++) {
+    for (i = 0; i <  3; i++) { // u, g, o
+        for (j = 0; j < 4; j++) { // r, w, x, s
             if (user[i] && mode[j]) {
                 chgperm |= permission_arr[i][j];
             }
@@ -133,12 +142,32 @@ void symbol_mode(int argc, char** argv, int index)
         statbuf.st_mode &= ~chgperm;
     }
     else if (operator == '=') {
-        statbuf.st_mode = chgperm;
+        statbuf.st_mode &= ~(04000);    // 설정되어 있는 setuid 해제
+        statbuf.st_mode &= ~(02000);    // 설정되어 있는 setgid 해제
+
+        // = 로 설정할 유저 정보외의 나머지 정보는 그대로 두기 위해서 
+        // 아래 코드를 실행한다.
+        if (user[0]) {
+            statbuf.st_mode &= ~(0700);  // 000111111    
+        }
+        if (user[1]) {
+            statbuf.st_mode &= ~(070); // 111000111
+        }
+        if (user[2]) {
+            statbuf.st_mode &= ~(07);   // 111111000
+        }
+        statbuf.st_mode |= chgperm;
     }
 
-    if (chmod(argv[2], statbuf.st_mode) == -1) {
-        fprintf(stderr, "couldn't change mode for %s\n", argv[2]);
+    if (chmod(filename, statbuf.st_mode) == -1) {
+        fprintf(stderr, "couldn't change mode for %s\n", filename);
         exit(2);
+    }
+
+    // 여러 명령이 나열되어 있다면(예를 들어 u+w, g+w, ...) 재귀적으로 나머지 명령을 처리한다.
+    index++;
+    if (index < argc - 1) {
+        symbol_mode(argc, argv, index);
     }
 }
 

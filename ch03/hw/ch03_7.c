@@ -16,15 +16,17 @@ int octal_to_decimal(char* number);
 int main(int argc, char* argv[])
 {
     int mode = 0;
+    char* cmd_permission = argv[2]; // 터미널에서 입력받은 화일 허가 모드
+
     if (argc < 3) {
         fprintf(stderr, "program usage : ./setperm filename (octal_permission | ls_style_permission)\n");
         return 1;
     }
 
-    if (argv[2][0] != '0') 
-        mode = lsoct(argv[2]);
+    if (cmd_permission[0] != '0') 
+        mode = lsoct(cmd_permission);
     else 
-        mode = octal_to_decimal(argv[2]);
+        mode = octal_to_decimal(cmd_permission);
 
     if (chmod(argv[1], mode) == -1) {
         fprintf(stderr, "couldn't change mode %s\n", argv[1]);
