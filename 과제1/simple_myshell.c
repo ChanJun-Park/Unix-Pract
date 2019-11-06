@@ -24,19 +24,26 @@
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+
 #define MAX_CMD_ARG 10
 #define MAX_BGND_PROC 100
+#define MAX_PATH_SIZE 100
+#define MAX_USR_NAME 100
+#define TRUE 1
+#define FALSE 0
 
 // const char *prompt = "myshell> ";
 const char *prompt_front = "myshell:";
 char prompt[BUFSIZ];
 char* cmdvector[MAX_CMD_ARG];
 char  cmdline[BUFSIZ];
+char homedirpath[MAX_PATH_SIZE];
 
 void fatal(char *str);
 void makeprompt();
 int makelist(char *s, const char *delimiters, char** list, int MAX_LIST);
 void catchsigchld(int signo);
+int findhomepath();
 
 int main() {
     int i=0;
@@ -65,9 +72,25 @@ int main() {
         // makelist 함수를 fork() 함수 호출 이전으로 앞당긴다.
         numtokens = makelist(cmdline, " \t", cmdvector, MAX_CMD_ARG);
 
+        if (numtokens == -1) {
+            fprintf(stderr, "명령어가 너무 깁니다.\n");
+            continue;
+        }
+
         // shell built-in 명령어들 처리
         if (!strcmp(cmdvector[0], "cd")) {
-            chdir(cmdvector[1]);
+            if (numtokens == 1) {  // home 디렉토리로 이동
+                findhomepath();
+                cmdvector[1] = homedirpath;
+            }
+            else if (numtokens > 2) {
+                fprintf(stderr, "cd : 인수가 너무 많음\n");
+                continue;
+            }
+            if (chdir(cmdvector[1]) == -1) {
+                fprintf(stderr, " %s ", cmdvector[1]);
+                perror(" cd ");                
+            }
             continue;
         }
         else if (!strcmp(cmdvector[0], "exit")) {
@@ -153,4 +176,21 @@ void catchsigchld(int signo) {
             
     //     }
     // }
+}
+
+// 제어 단말기를 사용하는 사용자의 홈 디렉토리를 계산한다.
+int findhomepath() {
+    char *username;
+    int len;
+
+    if ( (username = getlogin()) == NULL) {
+        return FALSE;
+    }
+    
+    strcpy(homedirpath, "/home/");
+    
+    len = strlen(homedirpath);
+    strcpy(&homedirpath[len], username);
+
+    return TRUE;
 }
