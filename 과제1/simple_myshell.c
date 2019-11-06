@@ -38,6 +38,7 @@ char prompt[BUFSIZ];
 char* cmdvector[MAX_CMD_ARG];
 char  cmdline[BUFSIZ];
 char homedirpath[MAX_PATH_SIZE];
+pid_t fgnd_process;
 
 void fatal(char *str);
 void makeprompt();
@@ -108,8 +109,10 @@ int main() {
   		    fatal("main()");
 	    default:    // 부모 프로세스(myshell)
             if (strcmp(cmdvector[numtokens - 1], "&")) {    // 백그라운드 실행이 아닐때 pause를 통해서 동기화시킨다.
-                // waitpid(pid, &status, 0);
-                pause();
+                fgnd_process = pid;
+                while(fgnd_process != 0) {  // foreground 프로세스가 종료되지 않은 경우에 background 프로세스의 
+                    pause();                // 종료에 의해서 pause가 풀리지 않도록 계속해서 pause한다.
+                }
             }
 	    }
     }
@@ -170,12 +173,11 @@ void catchsigchld(int signo) {
         fatal("error in catchsigchld");
     }
 
-    // if (WIFEXITED(status)) {
-    //     exit_status = WEXITSTATUS(status);
-    //     if (exit_status == 0) {
-            
-    //     }
-    // }
+    // foreground 프로세스가 종료된 경우 main함수 내부의 pause에서 
+    // 탈출할 수 있도록 fgnd_process를 0으로 설정한다.
+    if (pid == fgnd_process) {
+        fgnd_process = 0;
+    }
 }
 
 // 제어 단말기를 사용하는 사용자의 홈 디렉토리를 계산한다.
