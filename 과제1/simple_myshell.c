@@ -5,15 +5,16 @@
     - 2019-11-05 : (1) cd 명령어 오류 수정. cd 명령어는 bash의 built-in 명령이다.
                    따라서 execv를 이용한 프로세스 변경이 아니라 myshell 자체적으로
                    처리한다.
+
                    (2) exit 명령어 추가. exit 명령어 역시 bash의 built-in 명령이다.
-                   (3) background 실행 구현. 두가지 방법을 생각했다. 하나는 자식프로세스(a)가
-                   다시 자식 프로세스(b)를 fork한 다음, wait하지 않고 바로 종료하여 (b)프로세스가
-                   orphant 프로세스로서 init을 부모로 가지게 하는 방법이다. 이렇게 하면 background
-                   로 실행되는 프로세스가 종료될때 init이 알아서 wait하게 할 수 있다. 그러나 background
-                   프로세스는 myshell의 직계 자손이 되지 않는다. 두번째는 background 프로세스는
-                   wait하지 않고 좀비 프로세스가 되도록 하는 것이다. 이는 background 프로세스가 myshell
-                   의 직계 자손이 되지만 종료된 background 프로세스를 좀비가 되지 않도록 myshell에서 
-                   관리 코드를 넣어주어야 한다. 일단은 두번째 방법으로 구현했다.
+                   myshell 자체적으로 처리한다.
+                   
+                   (3) foreground & background 실행 구현. 우선 종료된 자식프로세스를 
+                   관리하기 위해 사용하는 wait 함수를 main이 아닌 SIGCHLD 시그널 핸들러
+                   에서 호출하게 했다. foreground 명령의 경우 부모 프로세스에서 자식 프로세스의 
+                   종료로 발생하는 SIGCHLD가 적절히 처리될때까지 pause함수를 호출하여 
+                   대기시킴으로써 구현하였다. background 명령의 경우 pause 함수를 호출하지
+                   않게하여 myshell의 while 구문이 계속해서 실행되도록 하여 구현하였다.
 */
 
 #include <stdio.h>
@@ -24,6 +25,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #define MAX_CMD_ARG 10
+#define MAX_BGND_PROC 100
 
 // const char *prompt = "myshell> ";
 const char *prompt_front = "myshell:";
@@ -35,7 +37,6 @@ void fatal(char *str);
 void makeprompt();
 int makelist(char *s, const char *delimiters, char** list, int MAX_LIST);
 void catchsigchld(int signo);
-void clearcmdline();
 
 int main() {
     int i=0;
@@ -50,6 +51,7 @@ int main() {
     // 필요시 myshell에서 수행해야하는 일들 처리
     act.sa_handler = catchsigchld;
     sigfillset(&(act.sa_mask));         // 처리중에 들어오는 다른 시그널 blocking
+    act.sa_flags = SA_RESTART;          // 시스템호출이 시그널 핸들러에 의해 블럭되는 경우 재시작
     sigaction(SIGCHLD, &act, NULL);
 
     while (1) {
@@ -96,12 +98,16 @@ void fatal(char *str) {
     exit(1);
 }
 
+// myshell이 실행되고 있는 현재 작업디렉토리를 표시할 수 있도록
+// shell prompt를 만드는 함수
 void makeprompt() {
     int len = strlen(prompt_front);
+
     strcpy(prompt, prompt_front);
     if (getcwd(prompt + len, BUFSIZ - len) == NULL) {
         fatal("error in makeprompt");
     }
+
     len = strlen(prompt);
     prompt[len] = '>';
     prompt[len + 1] = '\0';
@@ -113,8 +119,6 @@ int makelist(char *s, const char *delimiters, char** list, int MAX_LIST) {
     char *snew = NULL;
 
     if( (s==NULL) || (delimiters==NULL) ) return -1;
-
-    printf("\n\n test code : %s \n\n", s);
 
     snew = s + strspn(s, delimiters);	/* delimiters�� skip */
     if( (list[numtokens]=strtok(snew, delimiters)) == NULL )
@@ -143,14 +147,10 @@ void catchsigchld(int signo) {
         fatal("error in catchsigchld");
     }
 
-    if (WIFEXITED(status)) {
-        exit_status = WEXITSTATUS(status);
-        if (exit_status == 0) {
+    // if (WIFEXITED(status)) {
+    //     exit_status = WEXITSTATUS(status);
+    //     if (exit_status == 0) {
             
-        }
-    }
-}
-
-void clearcmdline() {
-    cmdline[0] = '\0';
+    //     }
+    // }
 }
