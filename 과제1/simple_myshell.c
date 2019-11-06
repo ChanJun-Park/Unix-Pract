@@ -16,10 +16,11 @@
                    관리 코드를 넣어주어야 한다. 일단은 두번째 방법으로 구현했다.
 */
 
-#include <string.h>
-#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #define MAX_CMD_ARG 10
@@ -33,6 +34,8 @@ char  cmdline[BUFSIZ];
 void fatal(char *str);
 void makeprompt();
 int makelist(char *s, const char *delimiters, char** list, int MAX_LIST);
+void catchsigchld(int signo);
+void clearcmdline();
 
 int main() {
     int i=0;
@@ -40,15 +43,22 @@ int main() {
     int status = 0;
     pid_t pid;
     pid_t tmp_pid;
+    static struct sigaction act;
+
+
+    // myshell의 자식 프로세스가 종료하거나 중단되는 경우(SIGCHLD)
+    // 필요시 myshell에서 수행해야하는 일들 처리
+    act.sa_handler = catchsigchld;
+    sigfillset(&(act.sa_mask));         // 처리중에 들어오는 다른 시그널 blocking
+    sigaction(SIGCHLD, &act, NULL);
 
     while (1) {
-        
+
         makeprompt();
   	    fputs(prompt, stdout);
 	    fgets(cmdline, BUFSIZ, stdin);
 	    cmdline[strlen(cmdline) - 1] ='\0';
 
-        // chdir 명령어는 호출하는 프로세스에만 적용된다.
         // cd 명령을 감지하고 자식 프로세스가 아니라 myshell 내부적으로 처리하기 위해
         // makelist 함수를 fork() 함수 호출 이전으로 앞당긴다.
         numtokens = makelist(cmdline, " \t", cmdvector, MAX_CMD_ARG);
@@ -72,8 +82,9 @@ int main() {
 	    case -1:
   		    fatal("main()");
 	    default:    // 부모 프로세스(myshell)
-            if (strcmp(cmdvector[numtokens - 1], "&")) {    // 백그라운드 실행이 아닐때만 wait로 동기화
-                waitpid(pid, &status, 0);
+            if (strcmp(cmdvector[numtokens - 1], "&")) {    // 백그라운드 실행이 아닐때 pause를 통해서 동기화시킨다.
+                // waitpid(pid, &status, 0);
+                pause();
             }
 	    }
     }
@@ -103,6 +114,8 @@ int makelist(char *s, const char *delimiters, char** list, int MAX_LIST) {
 
     if( (s==NULL) || (delimiters==NULL) ) return -1;
 
+    printf("\n\n test code : %s \n\n", s);
+
     snew = s + strspn(s, delimiters);	/* delimiters�� skip */
     if( (list[numtokens]=strtok(snew, delimiters)) == NULL )
         return numtokens;
@@ -117,4 +130,27 @@ int makelist(char *s, const char *delimiters, char** list, int MAX_LIST) {
         numtokens++;
     }
     return numtokens;
+}
+
+// myshell 에서 실행한 프로세스가 종료된 경우 실행되는 SIGCHLD 시그널 핸들러
+// 종료된 자식 프로세스를 wait를 통해 거두어들인다.
+void catchsigchld(int signo) {
+    pid_t pid;
+    int status;
+    int exit_status;
+
+    if ((pid = wait(&status)) == -1) {
+        fatal("error in catchsigchld");
+    }
+
+    if (WIFEXITED(status)) {
+        exit_status = WEXITSTATUS(status);
+        if (exit_status == 0) {
+            
+        }
+    }
+}
+
+void clearcmdline() {
+    cmdline[0] = '\0';
 }
