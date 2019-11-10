@@ -74,8 +74,8 @@ int main() {
     act.sa_handler = SIG_IGN;
     sigemptyset(&(act.sa_mask));
     
-    sigaction(SIGQUIT, &act, NULL);
     sigaction(SIGINT, &act, NULL);
+    sigaction(SIGQUIT, &act, NULL);
     sigaction(SIGTSTP, &act, NULL);
 
     // background 프로세스가 터미널에 write를 시도할때 발생
@@ -222,9 +222,9 @@ void run_cmd_grp(char** cmd_args, int type) {
         
         // 자식프로세스는 제어키(^C, ^\, ^Z)에 대해서 디폴트 액션을 취하도록 설정
         nact.sa_handler = SIG_DFL;
-        sigaction(SIGQUIT, &nact, NULL);
         sigaction(SIGINT, &nact, NULL);
-        sigaction(SIGTSTP, &nact, NULL);
+        sigaction(SIGQUIT, &nact, NULL);
+        sigaction(SIGTSTP, &nact, NULL);  // 프로세스 중단 수정 필요
         
         if (type == FOREGROUND) {   // 자식 프로세스가 터미널에 대한 제어권 획득
             tcsetpgrp(STDIN_FILENO, getpgid(0));
