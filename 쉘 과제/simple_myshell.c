@@ -62,6 +62,8 @@ int main() {
     pid_t tmp_pid;
     static struct sigaction act;
 
+    findhomepath();
+
     // myshell의 자식 프로세스가 종료하거나 중단되는 경우(SIGCHLD)
     // 필요시 myshell에서 수행해야하는 일들 처리
     act.sa_handler = catchsigchld;
@@ -103,7 +105,6 @@ int main() {
         // shell built-in 명령어들 처리
         if (!strcmp(cmdvector[0], "cd")) {
             if (numtokens == 1) {  // home 디렉토리로 이동
-                findhomepath();
                 cmdvector[1] = homedirpath;
             }
             else if (numtokens > 2) {
