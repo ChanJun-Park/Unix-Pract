@@ -33,7 +33,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
-#define MAX_CMD_ARG 10
+#define MAX_CMD_ARG 20
 #define MAX_BGND_PROC 100
 #define MAX_PATH_SIZE 100
 #define MAX_USR_NAME 100
@@ -232,6 +232,7 @@ int check_builtin(char** cmd_args, int numtokens) {
     return FALSE;
 }
 
+// 리디렉션할 io 번호 리턴
 int ionumber(char * arg) {
     int i, io_direction;
     int len = strlen(arg);
@@ -256,27 +257,33 @@ int command(char ** cmd_args) {
         if (strcmp(cmd_args[i], "<") == 0) {
             fds = open(cmd_args[i + 1], O_RDONLY);
             if (fds == -1) {
-                fatal("command()");
+                fatal("command() in 259");
             }
             dup2(fds, 0);
             close(fds);
+
+            // 리디렉션 명령은 쉘에서 처리. 명령어의 인자로 들어가면 안됨
+            cmd_args[i] = NULL;
         }
         else if (strcmp(cmd_args[i], ">") == 0) {
-            fds = open(cmd_args[i + 1], O_WRONLY | O_CREAT);
+            fds = open(cmd_args[i + 1], O_WRONLY | O_CREAT, 0666);
             if (fds == -1) {
-                fatal("command()");
+                fatal("command() in 267");
             }
             io_direction = ionumber(cmd_args[i - 1]);
 
             // 리디렉션은 stdout과 stderr에 대해서만 허용하였다
             // 또한 여러 파일로 출력하는 리디렉션은 구현하지 않았고, (ex > test1.txt > test2.txt)
             // stdout, stderr의 최대 2가지 방향으로만 리디렉션하여 최대 2가지 파일만 생성될 수 있다
-            if (io_direction != STDOUT_FILENO || io_direction != STDERR_FILENO) {
-                fatal("command()");
+            if (io_direction != STDOUT_FILENO && io_direction != STDERR_FILENO) {
+                fatal("command() in 275");
             }
 
             dup2(fds, io_direction);
             close(fds);
+
+            // 리디렉션 명령은 쉘에서 처리. 명령어의 인자로 들어가면 안됨
+            cmd_args[i] = NULL;
         }
     }
 
@@ -291,9 +298,13 @@ void pipe_sequence(char ** cmd_args) {
     int cmd_end_index;
 
     cmd_end_index = command(cmd_args);
-    if (strcmp(cmd_args[cmd_end_index], "|") == 0) { // 파이프 연결
+    if (cmd_args[cmd_end_index] == NULL) { // 단독 실행
+        execvp(cmd_args[0], cmd_args);      
+        fatal("pipe_sequence() 303");
+    }
+    else if (strcmp(cmd_args[cmd_end_index], "|") == 0) { // 파이프 연결
         if (pipe(pipe_fds) == -1) {
-            fatal("pipe call in pipe_sequence");
+            fatal("pipe call in pipe_sequence 307");
         }
 
         switch(pid = fork()) {
@@ -303,9 +314,9 @@ void pipe_sequence(char ** cmd_args) {
             close(pipe_fds[0]);
 
             pipe_sequence(&cmd_args[cmd_end_index + 1]);
-            fatal("pipe_sequence()");
+            fatal("pipe_sequence() 317");
         case -1:
-            fatal("pipe_sequence()");
+            fatal("pipe_sequence() 319");
         default: // 부모 프로세스
             cmd_args[cmd_end_index] = NULL;
             dup2(pipe_fds[1], 1);
@@ -313,12 +324,8 @@ void pipe_sequence(char ** cmd_args) {
             close(pipe_fds[1]);
 
             execvp(cmd_args[0], cmd_args);
-            fatal("pipe_sequence()");
+            fatal("pipe_sequence() 327");
         }
-    }
-    else { // 단독 실행
-        execvp(cmd_args[0], cmd_args);      
-        fatal("pie_sequence()");
     }
 }
 
@@ -329,6 +336,8 @@ void run_cmd_grp(char** cmd_args, int type) {
 
     switch(pid=fork()){
     case 0:     // 자식 프로세스
+        // 부모가 먼저 실행되게 하기 위해서
+        usleep(1000);
         // 새로운 프로세스 그룹 생성
         setpgid(0, 0);
         
@@ -347,7 +356,6 @@ void run_cmd_grp(char** cmd_args, int type) {
     case -1:
         fatal("main()");
     default:    // 부모 프로세스(myshell)
-        usleep(1000);                // 자식이 먼저 실행되기 위해서 조금 기다린다(1ms).
         if (type == FOREGROUND) {    // 백그라운드 실행이 아닐때 pause를 통해서 동기화시킨다.
             fgnd_process = pid;
             while(fgnd_process != 0) {  // foreground 프로세스가 종료되지 않은 경우에 background 프로세스의 
