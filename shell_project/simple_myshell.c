@@ -22,6 +22,52 @@
                    의해 종료될 수 있도록 시그널 처리.
 
     - 2019-11-19 : (1) initialize, check_builtin 함수를 정의하여 코드 정리
+
+                   (2) 리디렉션 명령과 파이프로 연결된 일련의 명령어들의 구조를 파악하고 이를
+                   처리하기 위해서 쉘 명령어에 대한 bash 명령어 문법을 참고하여 나만의 간단한
+                   문법을 작성해보았다.
+
+                   complete_command : pipe_sequence '&'
+                                    | pipe_sequence
+                                    ;
+                   pipe_sequence    : command
+                                    | command '|' pipe_sequence
+                                    ;
+                   command          : cmd_word cmd_suffix
+                                    | cmd_word
+                                    ;
+                   cmd_suffix       : io_redirect
+                                    | io_redirect cmd_suffix
+                                    ;
+                   io_redirect      :           io_file
+                                    | IO_NUMBER io_file
+                                    ;
+                   io_file          : '<'       FILENAME
+                                    | '>'       FILENAME
+                                    ;
+                    
+                   위 문법은 실제 bash의 명령어 문법에 비하여 상당한 변형과 간소화를 적용한 형태이다.
+
+                   complete_command를 인식하기 위해서 run_cmp_grp() 함수를 변형하였고, pipe_sequence를
+                   인식하기 위해서 pipe_sequence() 함수를 새로 만들었다. 그리고 command를 인식하기 위해서
+                   command() 함수를 만들었다.
+                   
+                   실제 bash에서는 'cat > test1.txt > test2.txt' 와 같은 형태로 표준 출력을 여러개의 
+                   방향으로 리디렉션할 수 있지만, 구현을 간단히 하기 위해서 표준 입력, 표준 출력, 표준 에러에
+                   대해서 각각 1개의 방향으로만 리디렉션 명령이 적용될 수 있도록 하였다. 따라서 io_redirect를
+                   인식하는 함수는 따로 작성하지 않았다.
+                   
+                   또한 실제 bash에서는 리디렉션 명령이 '> test1.txt cat' 과 같이 명령어 앞쪽에 위치해도 되지만,
+                   역시 구현을 간단히 하기 위해서 리디렉션 명령은 cat > test1.txt 와 같이 항상 명령어 뒤쪽으로만
+                   나타날 수 있다고 가정하고 구현하였다.
+
+                   리디렉션 처리는 따로 함수를 만들지 않고, command 함수에서 동시에 처리된다.
+
+                   전체적인 명령어 처리는 다음과 같다. 'a | b | c | d' 형태의 명령어가 있을때, 이 명령어를 처리하기
+                   위해서 pipe_sequence() 함수를 호출한다. 명령어는 다시 'a | B' 형태로 나누어서 생각할 수 있다
+                   (B = b | c | d). 이와 같은 분석으로 a 명령어를 command()를 통해 처리하고 | 뒤 쪽 B에 대해서는 
+                   프로세스를 새로 만들어서 이 프로세스가 pipe_sequence()를 재귀적으로 호출하여 처리하게 한다.
+                
 */
 
 #include <stdio.h>
@@ -50,17 +96,26 @@ char  cmdline[BUFSIZ];
 char homedirpath[MAX_PATH_SIZE];
 pid_t fgnd_process;
 
-void fatal(char *str);
+// 쉘 프롬프트 출력, 명령어 받기 관련 함수들
 void makeprompt();
 int makelist(char *s, const char *delimiters, char** list, int MAX_LIST);
-void catchsigchld(int signo);
 int findhomepath();
+
+// 시그널 관련 함수들
+void catchsigchld(int signo);
+void initialize();
+
+// 명령어 실행 관련 함수들
+int check_builtin(char** cmd_args, int numtokens);
 int ionumber(char * arg);
 int command(char ** cmd_args);
 void pipe_sequence(char ** cmd_args);
 void run_cmd_grp(char** cmd_args, int type);
-void initialize();
-int check_builtin(char** cmd_args, int numtokens);
+
+// 오류 처리 함수
+void fatal(char *str);
+
+/******************************************** main() ***********************************************/
 
 int main() {
     int i=0;
@@ -74,13 +129,13 @@ int main() {
 
     while (1) {
 
+        // 쉘 프롬프트 출력, 명령어 입력 처리
         makeprompt();
   	    fputs(prompt, stdout);
 	    fgets(cmdline, BUFSIZ, stdin);
 	    cmdline[strlen(cmdline) - 1] ='\0';
 
-        // cd 명령을 감지하고 자식 프로세스가 아니라 myshell 내부적으로 처리하기 위해
-        // makelist 함수를 fork() 함수 호출 이전으로 앞당긴다.
+        // 명령어 문자열을 명령어 토큰 리스트로 변환
         numtokens = makelist(cmdline, " \t", cmdvector, MAX_CMD_ARG);
 
         if (numtokens == -1) {
@@ -95,6 +150,7 @@ int main() {
         if (check_builtin(cmdvector, numtokens))
             continue;
 
+        // 명령어 처리
         if (!strcmp(cmdvector[numtokens - 1], "&")) {   // 백그라운드 실행이면
             cmdvector[numtokens - 1] = NULL;            // 백그라운드 옵션은 myshell에서 처리
             run_cmd_grp(cmdvector, BACKGROUND);
@@ -106,10 +162,7 @@ int main() {
     return 0;
 }
 
-void fatal(char *str) {
-    perror(str);
-    exit(1);
-}
+/************************************ 함수 정의 ***************************************************/
 
 // myshell이 실행되고 있는 현재 작업디렉토리를 표시할 수 있도록
 // shell prompt를 만드는 함수
@@ -126,6 +179,7 @@ void makeprompt() {
     prompt[len + 1] = '\0';
 }
 
+// 명령어 문자열을 명령어 토큰 리스트로 변환하는 함수
 int makelist(char *s, const char *delimiters, char** list, int MAX_LIST) {	
     int i = 0;
     int numtokens = 0;
@@ -133,7 +187,7 @@ int makelist(char *s, const char *delimiters, char** list, int MAX_LIST) {
 
     if( (s==NULL) || (delimiters==NULL) ) return -1;
 
-    snew = s + strspn(s, delimiters);	/* delimiters�� skip */
+    snew = s + strspn(s, delimiters);	/* delimiters skip */
     if( (list[numtokens]=strtok(snew, delimiters)) == NULL )
         return numtokens;
         
@@ -147,6 +201,23 @@ int makelist(char *s, const char *delimiters, char** list, int MAX_LIST) {
         numtokens++;
     }
     return numtokens;
+}
+
+// 제어 단말기를 사용하는 사용자의 홈 디렉토리를 계산한다.
+int findhomepath() {
+    char *username;
+    int len;
+
+    if ( (username = getlogin()) == NULL) {
+        return -1;
+    }
+    
+    strcpy(homedirpath, "/home/");
+    
+    len = strlen(homedirpath);
+    strcpy(&homedirpath[len], username);
+
+    return 0;
 }
 
 // myshell 에서 실행한 프로세스가 종료된 경우 실행되는 SIGCHLD 시그널 핸들러
@@ -167,23 +238,7 @@ void catchsigchld(int signo) {
     }
 }
 
-// 제어 단말기를 사용하는 사용자의 홈 디렉토리를 계산한다.
-int findhomepath() {
-    char *username;
-    int len;
-
-    if ( (username = getlogin()) == NULL) {
-        return -1;
-    }
-    
-    strcpy(homedirpath, "/home/");
-    
-    len = strlen(homedirpath);
-    strcpy(&homedirpath[len], username);
-
-    return 0;
-}
-
+// 각종 초기화 작업을 수행하는 함수
 void initialize() {
     static struct sigaction act;
 
@@ -209,6 +264,7 @@ void initialize() {
     signal(SIGTTOU, SIG_IGN);
 }
 
+// 쉘 내부 명령어를 처리하는 함수
 int check_builtin(char** cmd_args, int numtokens) {
     if (!strcmp(cmdvector[0], "cd")) {
         if (numtokens == 1) {  // home 디렉토리로 이동
@@ -254,6 +310,7 @@ int command(char ** cmd_args) {
     int io_direction;
 
     for (i = 0; cmd_args[i] != NULL && (strcmp(cmd_args[i], "|") != 0); i++) {
+
         if (strcmp(cmd_args[i], "<") == 0) {
             fds = open(cmd_args[i + 1], O_RDONLY);
             if (fds == -1) {
@@ -272,9 +329,6 @@ int command(char ** cmd_args) {
             }
             io_direction = ionumber(cmd_args[i - 1]);
 
-            // 리디렉션은 stdout과 stderr에 대해서만 허용하였다
-            // 또한 여러 파일로 출력하는 리디렉션은 구현하지 않았고, (ex > test1.txt > test2.txt)
-            // stdout, stderr의 최대 2가지 방향으로만 리디렉션하여 최대 2가지 파일만 생성될 수 있다
             if (io_direction != STDOUT_FILENO && io_direction != STDERR_FILENO) {
                 fatal("command() in 275");
             }
@@ -298,6 +352,7 @@ void pipe_sequence(char ** cmd_args) {
     int cmd_end_index;
 
     cmd_end_index = command(cmd_args);
+
     if (cmd_args[cmd_end_index] == NULL) { // 단독 실행
         execvp(cmd_args[0], cmd_args);      
         fatal("pipe_sequence() 303");
@@ -313,6 +368,7 @@ void pipe_sequence(char ** cmd_args) {
             close(pipe_fds[1]);
             close(pipe_fds[0]);
 
+            // '|' 이 후의 명령어들을 재귀적으로 처리한다.
             pipe_sequence(&cmd_args[cmd_end_index + 1]);
             fatal("pipe_sequence() 317");
         case -1:
@@ -364,4 +420,10 @@ void run_cmd_grp(char** cmd_args, int type) {
             tcsetpgrp(STDIN_FILENO, getpgid(0)); // 쉘은 기다렸다 제어권 회수
         }
     }
+}
+
+// 오류 처리 함수
+void fatal(char *str) {
+    perror(str);
+    exit(1);
 }
